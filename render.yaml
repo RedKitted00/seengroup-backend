@@ -16,7 +16,7 @@ services:
         sync: false
       - key: ADMIN_EMAIL
         sync: false
-      - key: COMPANY_NAME
+      - key: COMPANY_NAME       
         sync: false
       - key: CONTACT_EMAIL
         sync: false
