@@ -39,7 +39,20 @@ function initializePrisma() {
 // Create default admin function
 const createDefaultAdmin = async () => {
   try {
-    const adminEmail = process.env.ADMIN_EMAIL || 'cassinarourke@gmail.com';
+    const adminEmail = process.env.ADMIN_EMAIL;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+
+    // In production, require explicit admin creds; do not use insecure defaults
+    if (process.env.NODE_ENV === 'production') {
+      if (!adminEmail || !adminPassword) {
+        logger.warn('ADMIN_EMAIL or ADMIN_PASSWORD not set in production; skipping default admin creation');
+        return;
+      }
+    }
+
+    // In non-production, allow fallback for convenience
+    const effectiveEmail = adminEmail || 'dev-admin@example.com';
+    const effectivePassword = adminPassword || 'admin123';
     
     // Get the initialized Prisma client
     const prismaClient = initializePrisma();
@@ -51,19 +64,16 @@ const createDefaultAdmin = async () => {
     }
     
     const existingAdmin = await prismaClient.users.findUnique({
-      where: { email: adminEmail }
+      where: { email: effectiveEmail }
     });
 
     if (!existingAdmin) {
       const bcrypt = await import('bcryptjs');
-      const hashedPassword = await bcrypt.default.hash(
-        process.env.ADMIN_PASSWORD || 'admin123', 
-        12
-      );
+      const hashedPassword = await bcrypt.default.hash(effectivePassword, 12);
 
       await prismaClient.users.create({
         data: {
-          email: adminEmail,
+          email: effectiveEmail,
           password: hashedPassword,
           name: 'Admin User',
           role: 'ADMIN',

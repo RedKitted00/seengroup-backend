@@ -116,7 +116,7 @@ const limiter = rateLimit({
     }
     res.status(429).json({
       error: 'Too many requests from this IP, please try again later.',
-      retryAfter: Math.ceil(60 / 1000), // 1 minute in seconds
+      retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW_MS || '', 10) || 60000) / 1000),
       limit: isProduction ? 1000 : 5000,
       windowMs: 60000
     });
@@ -167,7 +167,7 @@ const adminLimiter = rateLimit({
     }
     res.status(429).json({
       error: 'Too many admin requests, please try again later.',
-      retryAfter: Math.ceil(60 / 1000), // 1 minute in seconds
+      retryAfter: Math.ceil(60),
       limit: isProduction ? 300 : 10000,
       windowMs: 60000
     });

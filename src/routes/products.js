@@ -555,7 +555,7 @@ router.put('/:id', [
   }
 }));
 
-// Delete product (soft delete)
+// Delete product (hard delete)
 router.delete('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
 
@@ -572,7 +572,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     }
 
     // Hard delete - completely remove from database
-          await prisma.products.delete({
+    await prisma.products.delete({
       where: { id }
     });
 

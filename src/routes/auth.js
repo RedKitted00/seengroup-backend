@@ -6,6 +6,8 @@ import prisma from '../config/database.js';
 import { generateToken, generateRefreshToken, comparePassword, protect, hashPassword } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { logger } from '../utils/logger.js';
+import cache from '../utils/cache.js';
+import { sendEmail } from '../utils/resendEmailService.js';
 
 const router = express.Router();
 
@@ -22,7 +24,39 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
-// @desc    Login user
+// OTP helpers
+const OTP_TTL_SECONDS = 5 * 60; // 5 minutes
+const OTP_LENGTH = 6;
+const formatSixDigits = (num) => num.toString().padStart(6, '0');
+const hashOtp = (code) => crypto.createHash('sha256').update(code).digest('hex');
+
+// Rate limit OTP verification attempts
+const otpVerifyLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Helper to resolve admin and guardian recipients from Settings (fallback to env)
+async function getAdminRecipients() {
+  try {
+    const settings = await prisma.settings.findMany({
+      where: { key: { in: ['admin_email', 'guardian_email'] } },
+      select: { key: true, value: true }
+    });
+    const map = settings.reduce((acc, s) => { acc[s.key] = s.value; return acc; }, {});
+    const adminEmail = map['admin_email'] || process.env.ADMIN_EMAIL || 'info@seengrp.com';
+    const guardianEmail = map['guardian_email'] || process.env.GUARDIAN_EMAIL || '';
+    return { adminEmail, guardianEmail };
+  } catch (e) {
+    const adminEmail = process.env.ADMIN_EMAIL || 'info@seengrp.com';
+    const guardianEmail = process.env.GUARDIAN_EMAIL || '';
+    return { adminEmail, guardianEmail };
+  }
+}
+
+// @desc    Login user (step 1: password verify → require OTP)
 // @route   POST /api/auth/login
 // @access  Public
 router.post('/login', loginLimiter, [
@@ -76,45 +110,46 @@ router.post('/login', loginLimiter, [
       });
     }
 
-    // Generate tokens with remember me option
-    const tokenExpiry = rememberMe ? '30d' : '24h';
-    const token = generateToken(user.id, tokenExpiry);
-    const refreshToken = generateRefreshToken(user.id);
+    // Step-up auth with OTP: generate and email a 6-digit code to configured admin inbox
+    const otpCode = formatSixDigits(Math.floor(100000 + Math.random() * 900000));
+    const otpHash = hashOtp(otpCode);
+    const otpId = crypto.randomUUID();
 
-    // Update last login (optional)
-    await prisma.users.update({
-      where: { id: user.id },
-      data: { updatedAt: new Date() }
-    });
+    // Store OTP info in cache (hash + user id + rememberMe) and a resend cooldown marker
+    const cacheKey = `otp_login_${otpId}`;
+    cache.set(cacheKey, { otpHash, userId: user.id, rememberMe: !!rememberMe, email: user.email }, OTP_TTL_SECONDS);
+    const cooldownKey = `otp_cd_${otpId}`;
+    cache.set(cooldownKey, true, 30); // 30s resend cooldown
 
-    // Log successful login
-    logger.info(`User logged in: ${user.email}`);
+    // Send OTP email to admin/owner inbox (out-of-band)
+    const { adminEmail, guardianEmail } = await getAdminRecipients();
+    const toEmail = adminEmail;
+    const userAgent = req.get('User-Agent') || 'unknown';
+    const ip = req.ip;
+    const subject = 'Your Seen Group admin login code';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 520px; margin:0 auto; padding:20px;">
+        <h2 style="margin:0 0 8px;">Your 6-digit login code</h2>
+        <p style="margin:0 0 12px; color:#374151;">Use this code to finish signing in to the admin panel.</p>
+        <div style="font-size:32px; letter-spacing:6px; font-weight:700; background:#111827; color:#fff; padding:12px 16px; text-align:center; border-radius:10px;">${otpCode}</div>
+        <p style="color:#6B7280; margin:16px 0 0;">Code expires in 5 minutes.</p>
+        <p style="color:#6B7280; margin:8px 0 0; font-size:13px;">Request from IP: ${ip} — Device: ${userAgent}</p>
+      </div>`;
+    const text = `Your 6-digit admin login code: ${otpCode}\nIt expires in 5 minutes.\nRequest IP: ${ip}\nDevice: ${userAgent}`;
 
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    try {
+      await sendEmail(toEmail, subject, html, text, { cc: guardianEmail || undefined });
+      logger.info('OTP sent', { toEmail, cc: guardianEmail || undefined, ip, userAgent });
+    } catch (e) {
+      logger.error('Failed to send OTP email:', e);
+      // Do not leak whether email sent; still require OTP
+    }
 
-    // Set HTTP-only cookies with remember me option
-    const tokenMaxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000; // 30 days or 24 hours
-    res.cookie('adminToken', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: tokenMaxAge
-    });
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
-
-    res.status(200).json({
+    // Respond with OTP required (do NOT set auth cookies yet)
+    res.status(202).json({
       success: true,
-      message: 'Login successful',
-      data: {
-        user: userWithoutPassword
-      }
+      message: 'OTP required. A code has been sent to the admin email.',
+      data: { otpId }
     });
   } catch (error) {
     logger.error('Login error:', error);
@@ -361,3 +396,133 @@ router.put('/change-password', [
 }));
 
 export default router;
+
+// @desc    Resend login OTP (cooldown protected)
+// @route   POST /api/auth/2fa/resend
+// @access  Public (requires otpId from prior login step)
+router.post('/2fa/resend', [
+  body('otpId').isString().notEmpty()
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+  }
+
+  const { otpId } = req.body;
+  const cacheKey = `otp_login_${otpId}`;
+  const record = cache.get(cacheKey);
+  if (!record) {
+    return res.status(404).json({ success: false, error: 'Session expired. Please login again.' });
+  }
+
+  // Cooldown check
+  const cooldownKey = `otp_cd_${otpId}`;
+  const onCooldown = cache.get(cooldownKey);
+  if (onCooldown) {
+    return res.status(429).json({ success: false, error: 'Please wait before requesting a new code.' });
+  }
+
+  // Generate new code and reset TTL to remaining time window
+  const newCode = formatSixDigits(Math.floor(100000 + Math.random() * 900000));
+  const newHash = hashOtp(newCode);
+  // Keep userId and rememberMe from record; refresh TTL to full window
+  cache.set(cacheKey, { ...record, otpHash: newHash }, OTP_TTL_SECONDS);
+  cache.set(cooldownKey, true, 30);
+
+  const { adminEmail, guardianEmail } = await getAdminRecipients();
+  const toEmail = adminEmail;
+  const userAgent = req.get('User-Agent') || 'unknown';
+  const ip = req.ip;
+  const subject = 'Your new Seen Group admin login code';
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin:0 auto; padding:20px;">
+      <h2 style="margin:0 0 8px;">Your new 6-digit login code</h2>
+      <div style="font-size:32px; letter-spacing:6px; font-weight:700; background:#111827; color:#fff; padding:12px 16px; text-align:center; border-radius:10px;">${newCode}</div>
+      <p style=\"color:#6B7280; margin:16px 0 0;\">Code expires in 5 minutes.</p>
+      <p style=\"color:#6B7280; margin:8px 0 0; font-size:13px;\">Request from IP: ${ip} — Device: ${userAgent}</p>
+    </div>`;
+  const text = `Your new 6-digit admin login code: ${newCode}\nIt expires in 5 minutes.\nRequest IP: ${ip}\nDevice: ${userAgent}`;
+
+  try {
+    await sendEmail(toEmail, subject, html, text, { cc: guardianEmail || undefined });
+    logger.info('OTP re-sent', { toEmail, cc: guardianEmail || undefined, ip, userAgent });
+  } catch (e) {
+    logger.error('Failed to resend OTP email:', e);
+  }
+
+  return res.status(200).json({ success: true, message: 'New code sent.' });
+}));
+
+// @desc    Verify login OTP (step 2) and issue tokens
+// @route   POST /api/auth/2fa/verify
+// @access  Public (after successful password check via otpId)
+router.post('/2fa/verify', otpVerifyLimiter, [
+  body('otpId').isString().notEmpty(),
+  body('code').isLength({ min: OTP_LENGTH, max: OTP_LENGTH }).isNumeric()
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+  }
+
+  const { otpId, code } = req.body;
+  const cacheKey = `otp_login_${otpId}`;
+  const record = cache.get(cacheKey);
+
+  // Generic error to avoid leaking info
+  const invalidMsg = 'Invalid or expired code';
+
+  if (!record) {
+    return res.status(401).json({ success: false, error: invalidMsg });
+  }
+
+  try {
+    const providedHash = hashOtp(String(code));
+    if (providedHash !== record.otpHash) {
+      // track failed attempts per otpId
+      const failKey = `otp_fail_${otpId}`;
+      const fails = (cache.get(failKey) || 0) + 1;
+      // keep fail counter TTL aligned with OTP TTL (re-set each time for simplicity)
+      cache.set(failKey, fails, OTP_TTL_SECONDS);
+      if (fails >= 5) {
+        cache.delete(cacheKey);
+        cache.delete(failKey);
+        return res.status(423).json({ success: false, error: 'Too many incorrect attempts. Please login again.' });
+      }
+      return res.status(401).json({ success: false, error: invalidMsg });
+    }
+
+    // One-time use
+    cache.delete(cacheKey);
+
+    // Fetch user and ensure still active
+    const user = await prisma.users.findUnique({ where: { id: record.userId } });
+    if (!user || !user.isActive) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // Issue tokens
+    const tokenExpiry = record.rememberMe ? '30d' : '24h';
+    const token = generateToken(user.id, tokenExpiry);
+    const refreshToken = generateRefreshToken(user.id);
+
+    // Update last login
+    await prisma.users.update({ where: { id: user.id }, data: { updatedAt: new Date() } });
+
+    const { password: _, ...userWithoutPassword } = user;
+
+    // Return tokens in JSON; frontend layer will set cookies
+    return res.status(200).json({
+      success: true,
+      message: 'OTP verified',
+      data: {
+        token,
+        refreshToken,
+        user: userWithoutPassword
+      }
+    });
+  } catch (error) {
+    logger.error('OTP verify error:', error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+}));
