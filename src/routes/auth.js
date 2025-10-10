@@ -9,6 +9,8 @@ import { logger } from '../utils/logger.js';
 import cache from '../utils/cache.js';
 import { sendEmail } from '../utils/resendEmailService.js';
 
+const BYPASS_2FA = process.env.BYPASS_2FA === '1';
+
 const router = express.Router();
 
 // Rate limiting for login attempts
@@ -109,7 +111,52 @@ router.post('/login', loginLimiter, [
         error: 'Invalid credentials'
       });
     }
+// GEÇİCİ: 2FA BYPASS (yalnızca BYPASS_2FA=1 iken devreye girer)
+if (BYPASS_2FA) {
+  const remember = !!rememberMe;
+  const tokenExpiry = remember ? '30d' : '24h';
 
+  // Bu fonksiyonlar zaten dosyanın üstünde import edilmiş olmalı:
+  // generateToken, generateRefreshToken (middleware/auth.js içinden)
+  const token = generateToken(user.id, tokenExpiry);
+  const refreshToken = generateRefreshToken(user.id);
+
+  // Son giriş zamanını güncelle (opsiyonel)
+  await prisma.users.update({
+    where: { id: user.id },
+    data: { updatedAt: new Date() }
+  });
+
+  // Parolayı response’tan çıkar
+  const { password: _pw, ...userWithoutPassword } = user;
+
+  // Cookie ömürleri
+  const tokenMaxAge = remember
+    ? 30 * 24 * 60 * 60 * 1000 // 30 gün
+    : 24 * 60 * 60 * 1000;     // 24 saat
+
+  res.cookie('adminToken', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: tokenMaxAge
+  });
+
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 gün
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: 'Login successful (2FA bypass)',
+    data: { user: userWithoutPassword }
+  });
+}
+
+    
     // Step-up auth with OTP: generate and email a 6-digit code to configured admin inbox
     const otpCode = formatSixDigits(Math.floor(100000 + Math.random() * 900000));
     const otpHash = hashOtp(otpCode);
