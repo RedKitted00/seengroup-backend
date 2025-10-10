@@ -270,5 +270,3 @@ process.on('uncaughtException', (err) => {
 });
 
 startServer();
-
-chore(security): tighten global and admin rate limits
