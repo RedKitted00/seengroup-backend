@@ -99,7 +99,7 @@ app.use(cors({
 // Rate limiting - strict in production, lenient in development
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '', 10) || 60 * 1000, // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '', 10) || (isProduction ? 1000 : 5000),
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '', 10) || (isProduction ? 120 : 5000),
   message: {
     error: 'Too many requests from this IP, please try again later.',
   },
@@ -151,7 +151,7 @@ app.use(speedLimiter);
 // Admin routes rate limiting
 const adminLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: isProduction ? 300 : 10000,
+  max: isProduction ? 60 : 10000,
   message: {
     error: 'Too many admin requests, please try again later.',
   },
@@ -270,3 +270,5 @@ process.on('uncaughtException', (err) => {
 });
 
 startServer();
+
+chore(security): tighten global and admin rate limits
