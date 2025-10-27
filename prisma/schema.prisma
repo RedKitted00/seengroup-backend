@@ -8,19 +8,21 @@ datasource db {
 }
 
 model career_applications {
-  id          String   @id @default(cuid())
-  jobId       String
-  name        String
-  email       String
-  phone       String?
-  resumeUrl   String?
-  coverLetter String?
-  status      String   @default("PENDING")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime
-  userId      String?
-  jobs        jobs     @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  users       users?   @relation(fields: [userId], references: [id])
+  id             String    @id @default(cuid())
+  jobId          String
+  name           String
+  email          String
+  phone          String?
+  resumeUrl      String?
+  coverLetter    String?
+  status         String    @default("PENDING")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime
+  userId         String?
+  emailConsent   Boolean   @default(false)
+  emailConsentAt DateTime?
+  jobs           jobs      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  users          users?    @relation(fields: [userId], references: [id])
 
   @@index([createdAt])
   @@index([email])
@@ -29,14 +31,14 @@ model career_applications {
 }
 
 model categories {
-  id          String     @id @default(cuid())
-  name        String     @unique
-  description String?
-  slug        String     @unique
-  isActive    Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime
-  products    products[]
+  id            String          @id @default(cuid())
+  name          String          @unique
+  description   String?
+  slug          String          @unique
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime
+  products      products[]
   subcategories subcategories[]
 }
 
@@ -49,32 +51,34 @@ model subcategories {
   isActive    Boolean    @default(true)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime
-  category    categories @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   products    products[]
+  category    categories @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, slug])
   @@index([categoryId])
 }
 
 model contact_submissions {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   firstName      String
   lastName       String
   company        String
   country        String
   phone          String
   email          String
-  contactReason  String
-  message        String?
-  requirements   String? // JSON as string for SQLite
-  productContext String? // JSON as string for SQLite
-  status         String   @default("NEW")
-  read           Boolean  @default(false)
+  requirements   String?
+  productContext String?
+  status         String    @default("NEW")
+  read           Boolean   @default(false)
   notes          String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
   updatedAt      DateTime
   userId         String?
-  users          users?   @relation(fields: [userId], references: [id])
+  contactReason  String
+  message        String?
+  emailConsent   Boolean   @default(false)
+  emailConsentAt DateTime?
+  users          users?    @relation(fields: [userId], references: [id])
 
   @@index([country])
   @@index([createdAt])
@@ -94,15 +98,15 @@ model jobs {
   isActive            Boolean               @default(true)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime
-  benefits            String // JSON as string for SQLite
+  benefits            String
   department          String?
   postedDate          DateTime?
   responsibilities    String?
   salary              String?
-  skills              String // JSON as string for SQLite
-  career_applications career_applications[]
+  skills              String
   archivedAt          DateTime?
   archivedBy          String?
+  career_applications career_applications[]
 
   @@index([createdAt])
   @@index([isActive])
@@ -139,20 +143,20 @@ model page_views {
 }
 
 model products {
-  id            String     @id @default(cuid())
+  id            String         @id @default(cuid())
   name          String
   description   String?
-  oemNumber     String?
-  manufacturer  String?
-  price         Decimal?   @db.Decimal(10,2)
   imageUrl      String?
   categoryId    String
-  subcategoryId String?
-  isActive      Boolean    @default(true)
-  createdAt     DateTime   @default(now())
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
   updatedAt     DateTime
-  categories    categories @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  subcategories subcategories? @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  price         Decimal?       @db.Decimal(10, 2)
+  manufacturer  String?
+  oemNumber     String?
+  subcategoryId String?
+  categories    categories     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subcategories subcategories? @relation(fields: [subcategoryId], references: [id])
 }
 
 model settings {
@@ -171,13 +175,13 @@ model users {
   isActive            Boolean               @default(true)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime
-  backupCodes         String // JSON as string for SQLite
+  backupCodes         String
   lastLoginAt         DateTime?
   lockedUntil         DateTime?
-  loginAttempts       Int                  @default(0)
+  loginAttempts       Int                   @default(0)
   resetToken          String?
   resetTokenExpiry    DateTime?
-  twoFactorEnabled    Boolean              @default(false)
+  twoFactorEnabled    Boolean               @default(false)
   twoFactorSecret     String?
   career_applications career_applications[]
   contact_submissions contact_submissions[]
