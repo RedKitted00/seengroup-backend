@@ -1,5 +1,7 @@
 import { Resend } from 'resend';
 import { logger } from './logger.js';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Initialize Resend lazily
 let resend = null;
@@ -15,6 +17,26 @@ const getResend = () => {
   return resend;
 };
 
+// Initialize S3 (R2) lazily using S3_* envs (fallback to R2_* if provided)
+let s3 = null;
+const getS3 = () => {
+  if (s3) return s3;
+  const endpoint = process.env.S3_ENDPOINT;
+  const accessKeyId = process.env.S3_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
+  const region = process.env.S3_REGION || 'auto';
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    return null; // missing config; caller should handle gracefully
+  }
+  s3 = new S3Client({
+    region,
+    endpoint,
+    credentials: { accessKeyId, secretAccessKey },
+    forcePathStyle: String(process.env.S3_FORCE_PATH_STYLE || '').toLowerCase() === 'true'
+  });
+  return s3;
+};
+
 // Email configuration
 const getEmailConfig = () => ({
   companyName: process.env.COMPANY_NAME || 'Seen Group',
@@ -24,6 +46,25 @@ const getEmailConfig = () => ({
   s3PublicBaseUrl: process.env.S3_PUBLIC_BASE_URL || '',
   companyLogo: 'https://pub-8b25a422bd234ffab965d339ba7bc4aa.r2.dev/site-logo.png'
 });
+
+const sanitizeFilename = (name = '') =>
+  String(name)
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'file';
+
+const buildSignedDownloadUrl = async ({ bucket, key, filename, expiresIn = 60 * 60 * 24 * 7 }) => {
+  const client = getS3();
+  if (!client) return null;
+  const cmd = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ResponseContentDisposition: `attachment; filename="${filename}"`,
+    ResponseContentType: 'application/pdf'
+  });
+  return getSignedUrl(client, cmd, { expiresIn });
+};
 
 // Email templates
 const emailTemplates = {
@@ -102,11 +143,33 @@ const emailTemplates = {
   },
 
   // Admin notification email template
-  adminNotification: (applicationData) => {
+  adminNotification: async (applicationData) => {
     const { name, email, phone, jobTitle, applicationId, resumeUrl, coverLetter, resumeEmailUrl, coverLetterEmailUrl } = applicationData;
     const config = getEmailConfig();
     const publicBase = (config.s3PublicBaseUrl || '').replace(/\/$/, '');
-    
+
+    // Try to build signed (forced-download) URLs when not provided
+    const bucket = process.env.S3_BUCKET || process.env.R2_BUCKET;
+    let { resumeEmailUrl: _resumeEmailUrl, coverLetterEmailUrl: _coverLetterEmailUrl } = applicationData;
+
+    const deriveKeyFromUrl = (url, folder) => {
+      if (!url) return null;
+      const m = url.match(new RegExp(`/(?:${folder})/([^?#]+)`));
+      return m ? `${folder}/${m[1]}` : null;
+    };
+
+    const resumeKey = applicationData.resumeKey || deriveKeyFromUrl(applicationData.resumeUrl, 'resumes');
+    const coverKey  = applicationData.coverLetterKey || deriveKeyFromUrl(applicationData.coverLetter, 'cover-letters');
+
+    if (!_resumeEmailUrl && bucket && resumeKey) {
+      const fname = `${sanitizeFilename(applicationData.name || 'applicant')}_resume.pdf`;
+      _resumeEmailUrl = await buildSignedDownloadUrl({ bucket, key: resumeKey, filename: fname });
+    }
+    if (!_coverLetterEmailUrl && bucket && coverKey) {
+      const fname = `${sanitizeFilename(applicationData.name || 'applicant')}_cover_letter.pdf`;
+      _coverLetterEmailUrl = await buildSignedDownloadUrl({ bucket, key: coverKey, filename: fname });
+    }
+
     // Build public links from S3_PUBLIC_BASE_URL if available by preserving the folder path.
     let resumePublicLink = null;
     if (publicBase && resumeUrl) {
@@ -118,10 +181,10 @@ const emailTemplates = {
       const match = coverLetter.match(/\/cover-letters\/.+$/);
       coverPublicLink = match ? `${publicBase}${match[0]}` : `${publicBase}/cover-letters/${coverLetter.split('/').pop()}`;
     }
-    
+
     // Prefer: signed URL (email), then public base URL. Do NOT fall back to admin-proxy endpoints for emails.
-    const safeResumeLink = resumeEmailUrl || resumePublicLink || null;
-    const safeCoverLink = coverLetterEmailUrl || coverPublicLink || null;
+    const safeResumeLink = _resumeEmailUrl || resumePublicLink || null;
+    const safeCoverLink = _coverLetterEmailUrl || coverPublicLink || null;
     
     return {
       subject: `New Job Application: ${jobTitle} - ${name}`,
@@ -313,7 +376,7 @@ export const sendAdminNotification = async (applicationData) => {
     return { success: false, error: 'Admin email not configured' };
   }
 
-  const template = emailTemplates.adminNotification(applicationData);
+  const template = await emailTemplates.adminNotification(applicationData);
   
   // Always send admin notification to the admin email
   // In development, if the admin email is not verified, we'll handle it in the sendEmail function
