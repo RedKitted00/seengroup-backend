@@ -32,7 +32,8 @@ export const uploadResume = upload.single('resume');
 // New: Upload both resume and optional PDF cover letter
 export const uploadApplicationFiles = upload.fields([
   { name: 'resume', maxCount: 1 },
-  { name: 'coverLetter', maxCount: 1 }
+  { name: 'coverLetter', maxCount: 1 },
+  { name: 'cover', maxCount: 1 } // alias support, in case frontend uses "cover"
 ]);
 
 // Error handling middleware for resume uploads
