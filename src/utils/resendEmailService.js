@@ -21,6 +21,7 @@ const getEmailConfig = () => ({
   contactEmail: process.env.CONTACT_EMAIL || 'info@seengrp.com',
   adminEmail: process.env.ADMIN_EMAIL || 'info@seengrp.com',
   frontendUrl: process.env.FRONTEND_URL || 'https://workflow-seengroup.vercel.app/',
+  s3PublicBaseUrl: process.env.S3_PUBLIC_BASE_URL || '',
   companyLogo: 'https://pub-8b25a422bd234ffab965d339ba7bc4aa.r2.dev/site-logo.png'
 });
 
@@ -104,12 +105,23 @@ const emailTemplates = {
   adminNotification: (applicationData) => {
     const { name, email, phone, jobTitle, applicationId, resumeUrl, coverLetter, resumeEmailUrl, coverLetterEmailUrl } = applicationData;
     const config = getEmailConfig();
-    const frontendBase = (config.frontendUrl || '').replace(/\/$/, '');
-    // Prefer pre-generated signed URLs coming from the caller; otherwise fall back to admin-proxy endpoints.
-    const safeResumeLink = resumeEmailUrl
-      || (resumeUrl ? `${frontendBase}/api/admin/career/applications/${applicationId}/resume` : null);
-    const safeCoverLink = coverLetterEmailUrl
-      || ((coverLetter && /^https?:\/\//.test(coverLetter)) ? `${frontendBase}/api/admin/career/applications/${applicationId}/cover-letter` : null);
+    const publicBase = (config.s3PublicBaseUrl || '').replace(/\/$/, '');
+    
+    // Build public links from S3_PUBLIC_BASE_URL if available by preserving the folder path.
+    let resumePublicLink = null;
+    if (publicBase && resumeUrl) {
+      const match = resumeUrl.match(/\/resumes\/.+$/);
+      resumePublicLink = match ? `${publicBase}${match[0]}` : `${publicBase}/resumes/${resumeUrl.split('/').pop()}`;
+    }
+    let coverPublicLink = null;
+    if (publicBase && coverLetter && /^https?:\/\//.test(coverLetter)) {
+      const match = coverLetter.match(/\/cover-letters\/.+$/);
+      coverPublicLink = match ? `${publicBase}${match[0]}` : `${publicBase}/cover-letters/${coverLetter.split('/').pop()}`;
+    }
+    
+    // Prefer: signed URL (email), then public base URL. Do NOT fall back to admin-proxy endpoints for emails.
+    const safeResumeLink = resumeEmailUrl || resumePublicLink || null;
+    const safeCoverLink = coverLetterEmailUrl || coverPublicLink || null;
     
     return {
       subject: `New Job Application: ${jobTitle} - ${name}`,
