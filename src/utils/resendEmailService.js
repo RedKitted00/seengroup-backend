@@ -102,11 +102,14 @@ const emailTemplates = {
 
   // Admin notification email template
   adminNotification: (applicationData) => {
-    const { name, email, phone, jobTitle, applicationId, resumeUrl, coverLetter } = applicationData;
+    const { name, email, phone, jobTitle, applicationId, resumeUrl, coverLetter, resumeEmailUrl, coverLetterEmailUrl } = applicationData;
     const config = getEmailConfig();
     const frontendBase = (config.frontendUrl || '').replace(/\/$/, '');
-    const safeResumeLink = resumeUrl ? `${frontendBase}/api/admin/career/applications/${applicationId}/resume` : null;
-    const safeCoverLink = (coverLetter && /^https?:\/\//.test(coverLetter)) ? `${frontendBase}/api/admin/career/applications/${applicationId}/cover-letter` : null;
+    // Prefer pre-generated signed URLs coming from the caller; otherwise fall back to admin-proxy endpoints.
+    const safeResumeLink = resumeEmailUrl
+      || (resumeUrl ? `${frontendBase}/api/admin/career/applications/${applicationId}/resume` : null);
+    const safeCoverLink = coverLetterEmailUrl
+      || ((coverLetter && /^https?:\/\//.test(coverLetter)) ? `${frontendBase}/api/admin/career/applications/${applicationId}/cover-letter` : null);
     
     return {
       subject: `New Job Application: ${jobTitle} - ${name}`,
@@ -166,8 +169,8 @@ const emailTemplates = {
         - Phone: ${phone || 'Not provided'}
         - Position: ${jobTitle}
         - Application ID: ${applicationId}
-        - Resume: ${resumeUrl ? 'Available for download' : 'No resume uploaded'}
-        - Cover Letter: ${coverLetter && /^https?:\/\//.test(coverLetter) ? 'Available for download' : 'No cover letter uploaded'}
+        - Resume: ${safeResumeLink ? safeResumeLink : 'No resume uploaded'}
+        - Cover Letter: ${safeCoverLink ? safeCoverLink : 'No cover letter uploaded'}
         
         View in Admin Panel: ${config.frontendUrl}/admin/career
         Reply to Applicant: ${email}
