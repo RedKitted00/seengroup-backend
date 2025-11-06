@@ -578,16 +578,7 @@ router.post(
 
     const { name, email, phone, position, message, jobId } = req.body;
     const resumeFile = req.files?.resume?.[0];
-    const coverFile = (req.files?.coverLetter?.[0] || req.files?.cover?.[0]) || null;
-
-    if (!resumeFile || (!coverFile && (req.body?.coverLetter && typeof req.body.coverLetter !== 'string'))) {
-      logger.warn('Career /applications upload debug', {
-        contentType: req.headers['content-type'],
-        hasResumeFile: !!resumeFile,
-        hasCoverLetterFile: !!coverFile,
-        fileFields: Object.keys(req.files || {}),
-      });
-    }
+    const coverFile = req.files?.coverLetter?.[0];
 
     try {
       // Validate that resume file is uploaded
