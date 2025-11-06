@@ -3,17 +3,9 @@ import multer from 'multer';
 // Configure storage: use memory to forward to S3-compatible storage
 const storage = multer.memoryStorage();
 
-// File filter for application uploads (resume + optional cover letter PDF)
+// File filter for application uploads (resume + cover letter)
 const fileFilter = (req, file, cb) => {
-  if (file.fieldname === 'coverLetter') {
-    // Cover letter must be PDF only
-    if (file.mimetype === 'application/pdf') {
-      return cb(null, true);
-    }
-    return cb(new Error('Cover letter must be a PDF file.'), false);
-  }
-
-  // Resume: allow PDF, DOC, DOCX
+  // Allow these types for both resume and coverLetter
   const allowedMimeTypes = [
     'application/pdf',
     'application/msword',
@@ -22,7 +14,7 @@ const fileFilter = (req, file, cb) => {
   if (allowedMimeTypes.includes(file.mimetype)) {
     return cb(null, true);
   }
-  return cb(new Error('Only PDF, DOC, and DOCX files are allowed for resumes!'), false);
+  return cb(new Error('Only PDF, DOC, and DOCX files are allowed.'), false);
 };
 
 // Configure multer for resumes
@@ -58,16 +50,10 @@ export const handleResumeUploadError = (error, req, res, next) => {
     });
   }
   
-  if (error.message === 'Only PDF, DOC, and DOCX files are allowed for resumes!') {
+  if (error.message === 'Only PDF, DOC, and DOCX files are allowed.') {
     return res.status(400).json({
       success: false,
-      error: 'Only PDF, DOC, and DOCX files are allowed for resumes!'
-    });
-  }
-  if (error.message === 'Cover letter must be a PDF file.') {
-    return res.status(400).json({
-      success: false,
-      error: 'Cover letter must be a PDF file.'
+      error: 'Only PDF, DOC, and DOCX files are allowed.'
     });
   }
   

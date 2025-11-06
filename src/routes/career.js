@@ -580,6 +580,17 @@ router.post(
     const resumeFile = req.files?.resume?.[0];
     const coverFile = req.files?.coverLetter?.[0];
 
+    // Debug: log incoming multipart structure to diagnose missing files
+    logger.warn('career/applications multipart debug', {
+      contentType: req.headers['content-type'],
+      bodyKeys: Object.keys(req.body || {}),
+      fileFieldNames: Object.keys(req.files || {}),
+      hasResume: !!resumeFile,
+      hasCoverLetter: !!coverFile,
+      resumeMeta: resumeFile ? { fieldname: resumeFile.fieldname, originalname: resumeFile.originalname, mimetype: resumeFile.mimetype, size: resumeFile.size } : null,
+      coverMeta: coverFile ? { fieldname: coverFile.fieldname, originalname: coverFile.originalname, mimetype: coverFile.mimetype, size: coverFile.size } : null
+    });
+
     try {
       // Validate that resume file is uploaded
       if (!resumeFile) {
