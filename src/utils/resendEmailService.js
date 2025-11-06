@@ -104,6 +104,9 @@ const emailTemplates = {
   adminNotification: (applicationData) => {
     const { name, email, phone, jobTitle, applicationId, resumeUrl, coverLetter } = applicationData;
     const config = getEmailConfig();
+    const frontendBase = (config.frontendUrl || '').replace(/\/$/, '');
+    const safeResumeLink = resumeUrl ? `${frontendBase}/api/admin/career/applications/${applicationId}/resume` : null;
+    const safeCoverLink = (coverLetter && /^https?:\/\//.test(coverLetter)) ? `${frontendBase}/api/admin/career/applications/${applicationId}/cover-letter` : null;
     
     return {
       subject: `New Job Application: ${jobTitle} - ${name}`,
@@ -138,14 +141,14 @@ const emailTemplates = {
             <div style="margin:16px 0; height:1px; background:#e5e7eb;"></div>
 
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
-              ${resumeUrl ? `<a href="${resumeUrl}" style="background:#059669; color:#fff; padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:600;">Download Resume</a>` : `<span style="background:#F3F4F6; color:#6B7280; padding:10px 14px; border-radius:8px;">No resume uploaded</span>`}
-              ${coverLetter && /^https?:\/\//.test(coverLetter) ? `<a href="${coverLetter}" style="background:#2563eb; color:#fff; padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:600;">Download Cover Letter</a>` : `<span style="background:#F3F4F6; color:#6B7280; padding:10px 14px; border-radius:8px;">No cover letter uploaded</span>`}
+              ${safeResumeLink ? `<a href="${safeResumeLink}" target="_blank" rel="noopener noreferrer" style="background:#059669; color:#fff; padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:600;">Download Resume</a>` : `<span style="background:#F3F4F6; color:#6B7280; padding:10px 14px; border-radius:8px;">No resume uploaded</span>`}
+              ${safeCoverLink ? `<a href="${safeCoverLink}" target="_blank" rel="noopener noreferrer" style="background:#2563eb; color:#fff; padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:600;">Download Cover Letter</a>` : `<span style="background:#F3F4F6; color:#6B7280; padding:10px 14px; border-radius:8px;">No cover letter uploaded</span>`}
             </div>
 
             <div style="margin-top:20px; padding:16px; background:#fff; border:1px solid #e5e7eb; border-radius:10px;">
               <p style="margin:0; color:#6b7280;">Open the admin panel to review and take action.</p>
               <div style="margin-top:12px;">
-                <a href="${config.frontendUrl}/admin/career" style="background:#111827; color:#fff; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:600;">Open Admin Panel</a>
+                <a href="${config.frontendUrl}/admin/career" target="_blank" style="background:#111827; color:#fff; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:600;">Open Admin Panel</a>
                 <a href="mailto:${email}" style="margin-left:8px; background:#4f46e5; color:#fff; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:600;">Reply to Applicant</a>
               </div>
             </div>
