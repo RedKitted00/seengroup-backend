@@ -144,7 +144,7 @@ const emailTemplates = {
 
   // Admin notification email template
   adminNotification: async (applicationData) => {
-    const { name, email, phone, jobTitle, applicationId, resumeUrl, coverLetter, resumeEmailUrl, coverLetterEmailUrl } = applicationData;
+    const { name, email, phone, jobTitle, applicationId, resumeUrl, coverLetter } = applicationData;
     const config = getEmailConfig();
     const publicBase = (config.s3PublicBaseUrl || '').replace(/\/$/, '');
 

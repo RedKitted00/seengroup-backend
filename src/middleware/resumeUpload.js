@@ -5,15 +5,7 @@ const storage = multer.memoryStorage();
 
 // File filter for application uploads (resume + optional cover letter PDF)
 const fileFilter = (req, file, cb) => {
-  if (file.fieldname === 'coverLetter') {
-    // Cover letter must be PDF only
-    if (file.mimetype === 'application/pdf') {
-      return cb(null, true);
-    }
-    return cb(new Error('Cover letter must be a PDF file.'), false);
-  }
-
-  // Resume: allow PDF, DOC, DOCX
+  // sesume & coverLetter: allow PDF, DOC, DOCX
   const allowedMimeTypes = [
     'application/pdf',
     'application/msword',
